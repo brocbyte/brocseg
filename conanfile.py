@@ -18,7 +18,6 @@ class BrocsegRecipe(ConanFile):
         self.requires("glew/2.2.0")
         self.requires("glad/0.1.36")
         self.requires("glm/cci.20230113")
-        self.requires("assimp/5.4.2")
         self.requires("imgui/1.91.0")
         self.requires("openmesh/11.0")
 

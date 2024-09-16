@@ -25,11 +25,6 @@
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// assimp
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
 // openmesh
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
 #include <OpenMesh/Core/IO/MeshIO.hh>
@@ -125,7 +120,7 @@ public:
   glm::vec3 pos;
   glm::vec3 normal;
   glm::vec3 color;
-  Vertex(const glm::vec3 &pos_) : pos(pos_) {}
+  Vertex(const glm::vec3 &pos_, const glm::vec3 &normal_) : pos(pos_), normal(normal_) {}
 };
 
 glm::vec3 randColor() {
@@ -136,29 +131,27 @@ glm::vec3 randColor() {
 
 class Mesh {
 public:
-  Mesh(aiMesh *mesh, glm::vec3 meshColor_, const std::string &name_) : name(name_) {
-    for (u32 i = 0; i < mesh->mNumVertices; ++i) {
-      Vertex v{glm::vec3(mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z)};
-      if (mesh->HasNormals()) {
-        v.normal = glm::vec3(mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z);
-      }
+  Mesh(OpenMeshT& mesh, const std::string &name) : name_(name), mesh_(mesh) {
+    for (OpenMeshT::VertexIter vIt = mesh.vertices_begin(); vIt != mesh.vertices_end(); ++vIt) {
+      OpenMeshT::Point p = mesh.point(*vIt);
+      OpenMeshT::Normal n = mesh.normal(*vIt);
+      Vertex v{glm::vec3{p[0], p[1], p[2]}, glm::vec3{n[0], n[1], n[2]}};
       v.color = randColor();
       vertices.push_back(v);
+      // postprocess vertex
       box.addPoint(v.pos);
+
     }
-    for (u32 i = 0; i < mesh->mNumFaces; i++) {
-      aiFace face = mesh->mFaces[i];
-      for (u32 j = 0; j < face.mNumIndices; j++)
-        indices.push_back(face.mIndices[j]);
+    for (OpenMeshT::FaceIter fIt = mesh.faces_begin(); fIt != mesh.faces_end(); ++fIt) {
+      OpenMeshT::Face f = mesh.face(*fIt);
+      for (OpenMeshT::FaceVertexIter fvIt = mesh.fv_iter(*fIt); fvIt.is_valid(); ++fvIt) {
+        indices.push_back(fvIt->idx());
+      }
     }
     // translate to origin
     glm::vec3 translate = -1.0f * (box.maxp + box.minp) / 2.0f;
     for (Vertex &v : vertices) {
       v.pos += translate;
-    }
-
-    for (u32 i = 0; i < 3; ++i) {
-      meshColor[i] = meshColor_[i];
     }
 
     glGenVertexArrays(1, &vao);
@@ -188,52 +181,41 @@ public:
   }
   void draw(const ShaderProgram &shaderProgram) const {
     glUseProgram(shaderProgram.getId());
-    glm::vec3 glmMeshColor = glm::vec3(meshColor[0], meshColor[1], meshColor[2]);
-    glUniform3fv(glGetUniformLocation(shaderProgram.getId(), "meshColor"), 1, &glmMeshColor[0]);
 
     glBindVertexArray(vao);
     glDrawElements(GL_TRIANGLES, static_cast<u32>(indices.size()), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
   }
 
-  const char *getName() { return name.c_str(); }
-
-public:
-  float meshColor[3];
+  const char *getName() const { return name_.c_str(); }
 
 private:
   BBox box;
   GLuint vao, vbo, ebo;
   std::vector<Vertex> vertices;
   std::vector<u32> indices;
-  std::string name;
+  std::string name_;
+  OpenMeshT mesh_;
 };
 
-class Model {
-public:
-  Model(const aiScene *scene, glm::vec3 color, const std::string &name) {
-    Mesh mesh{scene->mMeshes[0], color, name};
-    meshes.push_back(mesh);
+std::optional<Mesh> loadMesh(const std::string &pFile) {
+  OpenMeshT mesh;
+  mesh.request_vertex_normals();
+  if (!mesh.has_vertex_normals()) {
+    std::cout << "normals not available\n";
   }
-
-  // private:
-  std::vector<Mesh> meshes;
-};
-
-std::optional<Model> loadModel(const std::string &pFile) {
-  Assimp::Importer importer;
-
-  const aiScene *scene =
-      importer.ReadFile(pFile, aiProcess_CalcTangentSpace | aiProcess_Triangulate |
-                                   aiProcess_JoinIdenticalVertices | aiProcess_SortByPType);
-
-  if (nullptr == scene) {
-    std::cout << (importer.GetErrorString());
+  OpenMesh::IO::Options opt;
+  if (!OpenMesh::IO::read_mesh(mesh, pFile.c_str(), opt)) {
+    std::cout << "openmesh read error\n";
     return std::nullopt;
   }
+  if (!opt.check(OpenMesh::IO::Options::VertexNormal)) {
+    mesh.request_face_normals();
+    mesh.update_normals();
+    mesh.release_face_normals();
+  }
 
-  glm::vec3 color = randColor();
-  return Model{scene, color, pFile};
+  return Mesh{mesh, pFile};
 }
 
 } // namespace brocseg
@@ -300,11 +282,11 @@ int main(int argc, char *argv[]) {
   ImGui_ImplSDL2_InitForOpenGL(win, glContext);
   ImGui_ImplOpenGL3_Init();
 
-  std::vector<std::optional<Model>> models = {loadModel("stl/L_Ioscan.stl"),
-                                              loadModel("stl/Skull_And_Bones.stl")};
-  for (auto &model : models) {
-    if (!model) {
-      std::printf("Failed to import model");
+  std::vector<std::optional<Mesh>> meshes = {loadMesh("stl/L_Ioscan.stl"),
+                                              loadMesh("stl/Skull_And_Bones.stl")};
+  for (auto &mesh : meshes) {
+    if (!mesh) {
+      std::printf("Failed to import mesh");
       exit(1);
     }
   }
@@ -352,31 +334,28 @@ int main(int argc, char *argv[]) {
 
     glUseProgram(shader_programme);
 
-    for (auto &model : models) {
-      for (auto &mesh : model->meshes) {
-        glm::mat4 projM = glm::perspective(pi * 0.25f, 4.0f / 3.0f, 0.1f, 1000.f);
+    for (const std::optional<Mesh> &mesh : meshes) {
+      glm::mat4 projM = glm::perspective(pi * 0.25f, 4.0f / 3.0f, 0.1f, 1000.f);
 
-        glm::vec3 cameraPos =
-            glm::vec3(sin(cameraPhase) * cameraAmp, 0.0, cos(cameraPhase) * cameraAmp);
-        glm::mat4 viewM;
-        viewM = glm::lookAt(cameraPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+      glm::vec3 cameraPos =
+          glm::vec3(sin(cameraPhase) * cameraAmp, 0.0, cos(cameraPhase) * cameraAmp);
+      glm::mat4 viewM;
+      viewM = glm::lookAt(cameraPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
 
-        glm::mat4 modelM = glm::mat4(1.0f);
+      glm::mat4 modelM = glm::mat4(1.0f);
 
-        glm::vec3 lightPos = cameraPos;
+      glm::vec3 lightPos = cameraPos;
 
-        glUniformMatrix4fv(glGetUniformLocation(shader_programme, "model"), 1, GL_FALSE,
-                           glm::value_ptr(modelM));
-        glUniformMatrix4fv(glGetUniformLocation(shader_programme, "view"), 1, GL_FALSE,
-                           glm::value_ptr(viewM));
-        glUniformMatrix4fv(glGetUniformLocation(shader_programme, "projection"), 1, GL_FALSE,
-                           glm::value_ptr(projM));
-        glUniform3fv(glGetUniformLocation(shader_programme, "lightPos"), 1, &lightPos[0]);
+      glUniformMatrix4fv(glGetUniformLocation(shader_programme, "model"), 1, GL_FALSE,
+                         glm::value_ptr(modelM));
+      glUniformMatrix4fv(glGetUniformLocation(shader_programme, "view"), 1, GL_FALSE,
+                         glm::value_ptr(viewM));
+      glUniformMatrix4fv(glGetUniformLocation(shader_programme, "projection"), 1, GL_FALSE,
+                         glm::value_ptr(projM));
+      glUniform3fv(glGetUniformLocation(shader_programme, "lightPos"), 1, &lightPos[0]);
 
-        ImGui::ColorEdit3(mesh.getName(), mesh.meshColor);
-
-        mesh.draw(shaderProgram);
-      }
+      mesh->draw(shaderProgram);
+      ImGui::Text(mesh->getName());
     }
 
     ImGui::Render();

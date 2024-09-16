@@ -9,7 +9,6 @@ find_package(SDL2 REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLAD REQUIRED)
 find_package(GLM REQUIRED)
-find_package(assimp REQUIRED)
 find_package(imgui REQUIRED CONFIG)
 find_package(OpenMesh REQUIRED)
 
@@ -25,7 +24,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   glad::glad
   GLEW::GLEW
   glm::glm
-  assimp::assimp
   imgui::imgui
   openmesh::openmesh
 )
