@@ -3,6 +3,11 @@
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <cmath>
+
+// broc
+#include "brocmath.h"
+#include "brocprof.h"
 
 // sdl + opengl
 #include <glad/glad.h>
@@ -13,17 +18,6 @@
 #include <imgui.h>
 #include "imgui_bindings/imgui_impl_sdl2.h"
 #include "imgui_bindings/imgui_impl_opengl3.h"
-
-// glm
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/vec3.hpp>
-#include <glm/vec4.hpp>
-#include <glm/mat4x4.hpp>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/scalar_constants.hpp>
-#include <glm/gtx/string_cast.hpp>
 
 // openmesh
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
@@ -129,22 +123,24 @@ glm::vec3 randColor() {
                    static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
 }
 
+glm::vec3 tog(const OpenMeshT::Point &p) { return glm::vec3(p[0], p[1], p[2]); }
+
 class Mesh {
 public:
-  Mesh(OpenMeshT& mesh, const std::string &name) : name_(name), mesh_(mesh) {
-    for (OpenMeshT::VertexIter vIt = mesh.vertices_begin(); vIt != mesh.vertices_end(); ++vIt) {
-      OpenMeshT::Point p = mesh.point(*vIt);
-      OpenMeshT::Normal n = mesh.normal(*vIt);
-      Vertex v{glm::vec3{p[0], p[1], p[2]}, glm::vec3{n[0], n[1], n[2]}};
-      v.color = randColor();
-      vertices.push_back(v);
+  Mesh(OpenMeshT &mesh, const std::string &name) : name_(name), mesh_(mesh) {
+    for (OpenMeshT::VertexIter vIt = mesh_.vertices_begin(); vIt != mesh_.vertices_end(); ++vIt) {
+      OpenMeshT::Point p = mesh_.point(*vIt);
+      OpenMeshT::Normal n = mesh_.normal(*vIt);
+      Vertex v{tog(p), tog(n)};
+      v.color = glm::vec3(0.5f, 0.0f, 0.5f);
       // postprocess vertex
       box.addPoint(v.pos);
-
+      vertices.push_back(v);
     }
-    for (OpenMeshT::FaceIter fIt = mesh.faces_begin(); fIt != mesh.faces_end(); ++fIt) {
-      OpenMeshT::Face f = mesh.face(*fIt);
-      for (OpenMeshT::FaceVertexIter fvIt = mesh.fv_iter(*fIt); fvIt.is_valid(); ++fvIt) {
+
+    for (OpenMeshT::FaceIter fIt = mesh_.faces_begin(); fIt != mesh_.faces_end(); ++fIt) {
+      OpenMeshT::Face f = mesh_.face(*fIt);
+      for (OpenMeshT::FaceVertexIter fvIt = mesh_.fv_iter(*fIt); fvIt.is_valid(); ++fvIt) {
         indices.push_back(fvIt->idx());
       }
     }
@@ -170,11 +166,9 @@ public:
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
-
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           (void *)offsetof(Vertex, normal));
-
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           (void *)offsetof(Vertex, color));
@@ -185,6 +179,56 @@ public:
     glBindVertexArray(vao);
     glDrawElements(GL_TRIANGLES, static_cast<u32>(indices.size()), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
+  }
+
+  float gaussianCurvature(OpenMeshT::VertexHandle vh) {
+    std::vector<glm::vec3> adjacent =
+        mesh_.vv_range(vh).to_vector([this](const OpenMeshT::VertexHandle &vv) {
+          OpenMeshT::Point p = mesh_.point(vv);
+          return glm::vec3(p[0], p[1], p[2]);
+        });
+    glm::vec3 p = tog(mesh_.point(vh));
+    return math::gaussianCurvature(p, adjacent);
+  }
+
+  void colorByCurvature(float percentile) {
+
+    prof::watch w{};
+    std::vector<float> curvatures;
+    for (OpenMeshT::VertexHandle vh : mesh_.vertices()) {
+      curvatures.push_back(gaussianCurvature(vh));
+    }
+    std::cout << w.report("curvature") << "\n";
+
+    prof::watch percentileWatch{};
+    auto [m, M] = math::percentileThreshold(curvatures, percentile);
+    std::cout << percentile << " percentile: [" << m << ", " << M << "]\n";
+    for (int vIdx = 0; vIdx < vertices.size(); ++vIdx) {
+      Vertex &v = vertices[vIdx];
+      float normCurv = std::clamp(curvatures[vIdx], m, M);
+      normCurv = math::remap(normCurv, m, M, 0.0f, 1.0f);
+      v.color = math::colorFromNormalized(normCurv);
+    }
+    std::cout << percentileWatch.report("percentile calculation") << "\n";
+
+    glBindVertexArray(vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(),
+                 GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices[0]), &indices[0],
+                 GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void *)offsetof(Vertex, normal));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void *)offsetof(Vertex, color));
   }
 
   const char *getName() const { return name_.c_str(); }
@@ -282,14 +326,22 @@ int main(int argc, char *argv[]) {
   ImGui_ImplSDL2_InitForOpenGL(win, glContext);
   ImGui_ImplOpenGL3_Init();
 
-  std::vector<std::optional<Mesh>> meshes = {loadMesh("stl/L_Ioscan.stl"),
-                                              loadMesh("stl/Skull_And_Bones.stl")};
+  prof::watch meshesWatch;
+  std::vector<std::optional<Mesh>> meshes = {
+      loadMesh("stl/L_Ioscan.stl")//,
+      //loadMesh("stl/Sphere.stl")
+  };
+  std::cout << meshesWatch.report("mesh loading") << "\n";
+
+  static float curvaturePercentile = 0.9f;
   for (auto &mesh : meshes) {
     if (!mesh) {
       std::printf("Failed to import mesh");
       exit(1);
     }
+    mesh->colorByCurvature(curvaturePercentile);
   }
+  // https://julie-jiang.github.io/image-segmentation/
 
   const char *vertex_shader =
 #include "shader.vs"
@@ -328,6 +380,13 @@ int main(int argc, char *argv[]) {
     if (io.MouseWheel != 0.0f) {
       cameraAmp += -io.MouseWheel * 10.0f;
     }
+
+    if (ImGui::SliderFloat("curvature percentile", &curvaturePercentile, 0.1f, 1.0f)) {
+      for (auto &mesh : meshes) {
+        mesh->colorByCurvature(curvaturePercentile);
+      }
+    }
+
 
     glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
