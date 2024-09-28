@@ -195,6 +195,8 @@ public:
   }
   // returns indices of vertices in S-part of the flow network
   std::vector<size_t> mincut(size_t s, size_t t) {
+    std::vector<std::vector<size_t>> paths;
+
     std::vector<std::vector<i32>> residualCapacity{capacity_};
     int flow = 0;
     std::vector<size_t> parent(nVertices);
@@ -202,11 +204,13 @@ public:
     while (newFlow = bfs(s, t, parent, residualCapacity)) {
       flow += newFlow;
       size_t curr = t;
+      paths.push_back({curr});
       while (curr != s) {
         size_t prev = parent[curr];
         residualCapacity[prev][curr] -= newFlow;
         residualCapacity[curr][prev] += newFlow;
         curr = prev;
+        paths.back().push_back(curr);
       }
     }
     std::vector<size_t> sVertices;
@@ -216,6 +220,7 @@ public:
         sVertices.push_back(i);
       }
     }
+    std::cout << "MOY FLOW ARBALET: " << flow << "\n";
     return sVertices;
   }
   size_t nVertices;

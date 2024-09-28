@@ -1,1 +1,1 @@
-build\Release\brocseg.exe
+build\Debug\brocseg.exe

@@ -83,7 +83,8 @@ private:
 
 class Camera {
 public:
-  float phase;
+  float phaseY;
+  float phaseX;
   float amp;
   int screenWidth;
   int screenHeight;
@@ -92,7 +93,10 @@ public:
   glm::vec3 cameraPos;
   void updateMatrices() {
     projM = glm::perspective(brocseg::math::pi * 0.25f, (float)screenWidth / (float)screenHeight, 0.1f, 1000.f),
-    cameraPos = glm::vec3(sin(phase) * amp, 0.0, cos(phase) * amp),
+    cameraPos = glm::vec3(
+        glm::rotate(glm::mat4(1.0), phaseY, glm::vec3(0.0, 1.0, 0.0))
+        * glm::rotate(glm::mat4(1.0), phaseX, glm::vec3(0.0, 0.0, 1.0))
+        * glm::vec4(amp, 0, 0, 1));
     viewM = glm::lookAt(cameraPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
   }
 };
@@ -211,25 +215,6 @@ public:
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glGenBuffers(1, &ebo);
-
-    glBindVertexArray(vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(),
-                 GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices[0]), &indices[0],
-                 GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          (void *)offsetof(Vertex, normal));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          (void *)offsetof(Vertex, color));
   }
 
   void draw() const {

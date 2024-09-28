@@ -4,3 +4,4 @@ stl/
 imgui.ini
 CMakeUserPresets.json
 tags
+misc/
