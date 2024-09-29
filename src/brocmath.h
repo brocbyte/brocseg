@@ -43,13 +43,13 @@ inline float angleBetweenVectors(const glm::vec3 &a, const glm::vec3 &b) {
   return std::abs(std::acos(d));
 }
 
-inline float cotAngle(const glm::vec3 &a, const glm::vec3 &b) {
+inline float cotan(const glm::vec3 &a, const glm::vec3 &b) {
   return glm::dot(a, b) / glm::length(glm::cross(a, b));
 }
 
 inline float voronoiRegion(const glm::vec3 &p, const glm::vec3 &q, const glm::vec3 &r) {
-  float cotq = cotAngle(p - q, r - q);
-  float cotr = cotAngle(p - r, q - r);
+  float cotq = cotan(p - q, r - q);
+  float cotr = cotan(p - r, q - r);
   return (1.0f / 8.0f) * (len2(p - r) * cotq + len2(p - q) * cotr);
 }
 
@@ -91,6 +91,45 @@ inline float gaussianCurvature(const glm::vec3 &p, const std::vector<glm::vec3> 
     std::cout << "curvature is nan\n";
   }
   return curvature;
+}
+
+// https://rodolphe-vaillant.fr/entry/69/c-code-for-cotangent-weights-over-a-triangular-mesh
+inline std::vector<float> laplacianCotanWeight(const glm::vec3 &p,
+                                               const std::vector<glm::vec3> &adjacent) {
+  std::vector<float> result(adjacent.size());
+  for (size_t j = 0; j < adjacent.size(); ++j) {
+    size_t i = (j == 0) ? adjacent.size() - 1 : j - 1;
+    size_t k = (j + 1) % adjacent.size();
+    glm::vec3 v1 = p - adjacent[i];
+    glm::vec3 v2 = adjacent[j] - adjacent[i];
+    glm::vec3 v3 = p - adjacent[k];
+    glm::vec3 v4 = adjacent[j] - adjacent[k];
+    float cotan_alpha = cotan(v1, v2);
+    float cotan_beta = cotan(v3, v4);
+    float wij = (cotan_alpha + cotan_beta) /* / 2.0f*/;
+    if (std::isnan(wij)) {
+      wij = 0.0f;
+    }
+    const float cotan_max = std::cos(EPS) / std::sin(EPS);
+    wij = std::clamp(wij, -cotan_max, cotan_max);
+    result[j] = wij;
+  }
+  return result;
+}
+
+inline float meanCurvature(const glm::vec3 &p, const std::vector<glm::vec3> &adjacent, const glm::vec3 &n) {
+  std::vector<float> laplacian = math::laplacianCotanWeight(p, adjacent);
+  glm::vec3 meanCurvatureNormal = glm::vec3(0.0f);
+  for (size_t i = 0; i < adjacent.size(); ++i) {
+    meanCurvatureNormal += laplacian[i] * (adjacent[i] - p);
+  }
+  float area = mixedVoronoiCellArea(p, adjacent);
+  if (area <= EPS) {
+    return std::numeric_limits<float>::max();
+  }
+  meanCurvatureNormal *= 1.0f / (2.0f * area);
+  int meanCurvatureSign = glm::dot(n, -meanCurvatureNormal) >= 0 ? 1 : -1;
+  return meanCurvatureSign * glm::length(meanCurvatureNormal) / 2.0f;
 }
 
 inline std::pair<float, float> percentileThreshold(std::vector<float> arr, float percentile) {
@@ -172,7 +211,7 @@ inline glm::vec3 colorFromNormalized(float val) {
 class flownet {
 public:
   i32 bfs(size_t s, size_t t, std::vector<size_t> &parent,
-          std::vector<std::vector<i32>>& residualCapacity) {
+          std::vector<std::vector<i32>> &residualCapacity) {
     std::fill(parent.begin(), parent.end(), -1);
     parent[s] = -2;
     std::queue<std::pair<size_t, i32>> q;

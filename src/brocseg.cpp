@@ -32,13 +32,13 @@ struct Scene {
 
 float curvatureToQuality(float curvature) { return 1.0f / std::exp(curvature); }
 
-void normalize(std::vector<float>& arr, float percentile) {
+void normalize(std::vector<float> &arr, float percentile) {
   prof::watch percentileWatch{};
   auto [m, M] = math::percentileThreshold(arr, percentile);
   std::cout << percentile << " percentile: [" << m << ", " << M << "]\n";
   std::cout << percentileWatch.report("percentile calculation") << "\n";
 
-  for (auto& c : arr) {
+  for (auto &c : arr) {
     c = std::clamp(c, m, M);
     c = math::remap(c, m, M, 0.0f, 1.0f);
     c = std::clamp(c, 0.0f, 1.0f);
@@ -53,49 +53,66 @@ void colorBy(broc::Mesh &brocMesh, std::vector<float> source, float percentile) 
   brocMesh.sendGl();
 }
 
-std::vector<float> colorByCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh, float percentile) {
-  auto omMeshGaussianCurvature = [&omMesh](OpenMeshT::VertexHandle vh) -> float {
-    std::vector<glm::vec3> adjacent =
-        omMesh.vv_range(vh).to_vector([&omMesh](const OpenMeshT::VertexHandle &vv) {
-          OpenMeshT::Point p = omMesh.point(vv);
-          return glm::vec3(p[0], p[1], p[2]);
-        });
-    OpenMeshT::Point omPoint = omMesh.point(vh);
-    return math::gaussianCurvature(glm::vec3(omPoint[0], omPoint[1], omPoint[2]), adjacent);
-  };
+std::vector<glm::vec3> adjacentVertices(OpenMeshT &omMesh, OpenMeshT::VertexHandle vh) {
+  return omMesh.vv_range(vh).to_vector([&omMesh](const OpenMeshT::VertexHandle &vv) {
+    OpenMeshT::Point p = omMesh.point(vv);
+    return glm::vec3(p[0], p[1], p[2]);
+  });
+}
 
+std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh, float percentile) {
   prof::watch w{};
-  std::vector<float> curvatures;
+  std::vector<float> curvatures(omMesh.n_vertices());
   for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
-    curvatures.push_back(omMeshGaussianCurvature(vh));
+    std::vector<glm::vec3> adjacent = adjacentVertices(omMesh, vh);
+    OpenMeshT::Point point = omMesh.point(vh);
+    OpenMeshT::Normal normal = omMesh.normal(vh);
+    glm::vec p = glm::vec3(point[0], point[1], point[2]);
+    glm::vec n = glm::vec3(normal[0], normal[1], normal[2]);
+    float meanCurvature = math::meanCurvature(p, adjacent, n);
+    float gaussianCurvature = math::gaussianCurvature(p, adjacent);
+    float k1 = meanCurvature + std::sqrt(meanCurvature * meanCurvature - gaussianCurvature);
+    float k2 = meanCurvature - std::sqrt(meanCurvature * meanCurvature - gaussianCurvature);
+    curvatures[vh.idx()] = meanCurvature;
   }
   std::cout << w.report("curvature") << "\n";
-  for (size_t vIdx = 0; vIdx < omMesh.n_vertices(); ++vIdx) {
-    //curvatures[vIdx] = vIdx < omMesh.n_vertices() / 2 ? 0.5f : 0.0f;
-  }
 
   colorBy(brocMesh, curvatures, percentile);
   auto [minCurvature, maxCurvature] = math::percentileThreshold(curvatures, percentile);
 
   std::vector<float> weights(curvatures.size(), 0.0f);
-  float infiniteWeight = 1e5 * omMesh.n_faces();
+  float infiniteWeight = 1e8 * omMesh.n_vertices();
   float minQuality = curvatureToQuality(maxCurvature);
   float maxQuality = curvatureToQuality(minCurvature);
   std::transform(curvatures.begin(), curvatures.end(), weights.begin(),
-      [&infiniteWeight, &maxQuality, &minQuality](float c) {
-    float w = curvatureToQuality(c);
-    if (w > maxQuality) {
-      w = infiniteWeight;
-    } else if (w < minQuality) {
-      w = 0.0f;
-    }
-    return w;
-  });
+                 [&infiniteWeight, &maxQuality, &minQuality](float c) {
+                   float w = curvatureToQuality(c);
+                   if (w > maxQuality) {
+                     w = infiniteWeight;
+                   } else if (w < minQuality) {
+                     w = 0.0f;
+                   }
+                   return w;
+                 });
   return weights;
 }
 
-std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size_t sIdx, size_t tIdx,
-                    const std::vector<float> &energy) {
+std::vector<float> colorByMeanCurvature(OpenMeshT &omMesh, float percentile) {
+  std::vector<float> result(omMesh.n_vertices());
+  for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
+    std::vector<glm::vec3> adjacent = adjacentVertices(omMesh, vh);
+    OpenMeshT::Point point = omMesh.point(vh);
+    OpenMeshT::Normal normal = omMesh.normal(vh);
+    glm::vec p = glm::vec3(point[0], point[1], point[2]);
+    glm::vec n = glm::vec3(normal[0], normal[1], normal[2]);
+    float meanCurvature = math::meanCurvature(p, adjacent, n);
+    result[vh.idx()] = meanCurvature;
+  }
+  return result;
+}
+
+std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size_t sIdx,
+                                   size_t tIdx, const std::vector<float> &energy) {
   size_t nVertices = brocMesh.vertices.size();
   math::flownet g = {.nVertices = nVertices};
   g.adj_.resize(nVertices);
@@ -111,7 +128,8 @@ std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size
       float e1 = energy[vh.idx()];
       float e2 = energy[to.idx()];
       float diff = std::abs(e1 - e2);
-      g.capacity_[vh.idx()][to.idx()] = (diff > math::EPS) ? (1.0 / diff) : std::numeric_limits<i32>::max();
+      g.capacity_[vh.idx()][to.idx()] =
+          (diff > math::EPS) ? (1.0 / diff) : std::numeric_limits<i32>::max();
     }
   }
   std::vector<size_t> result = g.mincut(sIdx, tIdx);
@@ -184,30 +202,30 @@ glm::vec3 mouseToWorldDir(const glm::ivec2 &mouse, const broc::Camera &camera) {
   return rayWorld;
 }
 
-std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera, Scene &scene) {
+std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera,
+                                         Scene &scene) {
   // construct ray from camera to clicked point
   glm::vec3 rayWorld = mouseToWorldDir(mouse, camera);
   std::cout << rayWorld.x << " " << rayWorld.y << " " << rayWorld.z << "\n";
 
   broc::Mesh &brocMesh = scene.brocMesh;
   OpenMeshT &omMesh = scene.omMesh;
-  std::vector<float> vertexDistances(brocMesh.vertices.size(),
-      std::numeric_limits<float>::max());
+  std::vector<float> vertexDistances(brocMesh.vertices.size(), std::numeric_limits<float>::max());
   for (size_t i = 0; i < brocMesh.vertices.size(); ++i) {
     float dist = glm::length(glm::cross(rayWorld, brocMesh.vertices[i].pos - camera.cameraPos));
     if (dist <= 0.5) {
       vertexDistances[i] = glm::length(brocMesh.vertices[i].pos - camera.cameraPos);
     }
   }
-  size_t minDistIdx = std::distance(vertexDistances.begin(), std::min_element(
-        vertexDistances.begin(), vertexDistances.end()));
+  size_t minDistIdx = std::distance(
+      vertexDistances.begin(), std::min_element(vertexDistances.begin(), vertexDistances.end()));
 
   brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
   scene.selectedVertexIndices.push_back(minDistIdx);
   if (scene.selectedVertexIndices.size() >= 2) {
     size_t sIdx = scene.selectedVertexIndices[0];
     size_t tIdx = scene.selectedVertexIndices[1];
-    std::vector<float> curvatures = colorByCurvature(brocMesh, omMesh, scene.percentile);
+    std::vector<float> curvatures = colorByMeanCurvature(brocMesh, omMesh, scene.percentile);
     auto result = colorByBorders(brocMesh, omMesh, sIdx, tIdx, curvatures);
     scene.selectedVertexIndices.clear();
     for (size_t vIdx : result) {
@@ -234,12 +252,7 @@ int main(int argc, char *argv[]) {
   broc::OpenGLRenderer renderer{"brocseg", screenWidth, screenHeight};
 
   prof::watch meshesWatch;
-  const char *meshName =
-      "stl/L_Ioscan.stl";
-      //"stl/Sphere.stl";
-      //"stl/Skull_And_Bones.stl";
-      //"stl/528766.00_L_Gingiva.stl";
-  //"stl/Suzanne.stl";
+  const char *meshName = "stl/test.stl";
 
   Scene scene = {.omMesh = loadMesh(meshName),
                  .brocMesh = convert(scene.omMesh, meshName),
@@ -249,7 +262,7 @@ int main(int argc, char *argv[]) {
   scene.brocMesh.sendGl();
 
   // https://julie-jiang.github.io/image-segmentation/
-  colorByCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+  colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
 
   const char *vertex_shader =
 #include "shader.vs"
@@ -261,10 +274,11 @@ int main(int argc, char *argv[]) {
   broc::ShaderProgram shader{vertex_shader, fragment_shader};
   shader.useProgram();
 
-  broc::Camera camera{
-      .phaseY = 0.0f,
-      .phaseX = 0.0f,
-        .amp = 100.0f, .screenWidth = screenWidth, .screenHeight = screenHeight};
+  broc::Camera camera{.phaseY = 0.0f,
+                      .phaseX = 0.0f,
+                      .amp = 100.0f,
+                      .screenWidth = screenWidth,
+                      .screenHeight = screenHeight};
   camera.updateMatrices();
 
   bool running = true;
@@ -300,18 +314,18 @@ int main(int argc, char *argv[]) {
       ++replayIdx;
       if (replayIdx == replay.size()) {
         replayIdx = 0;
-        colorByCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+        colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
       }
     }
     */
 
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
       scene.selectedVertexIndices.clear();
-      colorByCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+      colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
     }
 
     if (ImGui::SliderFloat("curvature percentile", &scene.percentile, 0.1f, 1.0f)) {
-      colorByCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+      colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
     }
 
     for (size_t vIdx : scene.selectedVertexIndices) {
