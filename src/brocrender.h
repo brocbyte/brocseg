@@ -81,10 +81,18 @@ private:
   GLuint id_;
 };
 
+glm::vec3 sphericalToCartesian(float phi, float theta, float radius) {
+  return glm::vec3(
+    radius * std::sin(phi) * std::sin(theta),
+    radius * std::cos(phi),
+    radius * std::sin(phi) * std::cos(theta)
+  );
+}
+
 class Camera {
 public:
-  float phaseY;
-  float phaseX;
+  float theta;
+  float phi;
   float amp;
   int screenWidth;
   int screenHeight;
@@ -93,10 +101,8 @@ public:
   glm::vec3 cameraPos;
   void updateMatrices() {
     projM = glm::perspective(brocseg::math::pi * 0.25f, (float)screenWidth / (float)screenHeight,
-                             0.1f, 1000.f),
-    cameraPos = glm::vec3(glm::rotate(glm::mat4(1.0), phaseY, glm::vec3(0.0, 1.0, 0.0)) *
-                          glm::rotate(glm::mat4(1.0), phaseX, glm::vec3(0.0, 0.0, 1.0)) *
-                          glm::vec4(amp, 0, 0, 1));
+                             0.1f, 1000.f);
+    cameraPos = sphericalToCartesian(phi, theta, amp);
     viewM = glm::lookAt(cameraPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
   }
 };

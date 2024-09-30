@@ -89,7 +89,7 @@ std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh,
     if (w > maxQuality) {
       w = infiniteWeight;
     } else if (w < minQuality) {
-      w = -infiniteWeight;//0.0f;
+      w = -infiniteWeight; // 0.0f;
     }
     weights[i] = w;
   }
@@ -135,8 +135,8 @@ void translateToOrigin(broc::Mesh &brocMesh) {
   glm::vec3 translate = -1.0f * (box.maxp + box.minp) / 2.0f;
   glm::vec3 diag = box.maxp - box.minp;
   float scale = std::max(diag[0], std::max(diag[1], diag[2]));
-  glm::mat4 normalizer = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f / scale))
-    * glm::translate(glm::mat4(1.0f), translate);
+  glm::mat4 normalizer = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f / scale)) *
+                         glm::translate(glm::mat4(1.0f), translate);
   for (auto &v : brocMesh.vertices) {
     v.pos = glm::vec3(normalizer * glm::vec4(v.pos, 1.0f));
   }
@@ -197,7 +197,7 @@ glm::vec3 mouseToWorldDir(const glm::ivec2 &mouse, const broc::Camera &camera) {
   return rayWorld;
 }
 
-std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera,
+void handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera,
                                          Scene &scene) {
   // construct ray from camera to clicked point
   glm::vec3 rayWorld = mouseToWorldDir(mouse, camera);
@@ -206,15 +206,23 @@ std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Ca
   broc::Mesh &brocMesh = scene.brocMesh;
   OpenMeshT &omMesh = scene.omMesh;
   std::vector<float> vertexDistances(brocMesh.vertices.size(), std::numeric_limits<float>::max());
+  bool found = false;
   for (size_t i = 0; i < brocMesh.vertices.size(); ++i) {
     float dist = glm::length(glm::cross(rayWorld, brocMesh.vertices[i].pos - camera.cameraPos));
     if (dist <= 0.01) {
       float d = glm::dot(rayWorld, brocMesh.vertices[i].pos - camera.cameraPos);
       vertexDistances[i] = d;
+      found = true;
     }
   }
   size_t minDistIdx = std::distance(
       vertexDistances.begin(), std::min_element(vertexDistances.begin(), vertexDistances.end()));
+  if (!found) {
+    scene.selectedVertexIndices.clear();
+    colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+    brocMesh.sendGl();
+    return;
+  }
 
   brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
   scene.selectedVertexIndices.push_back(minDistIdx);
@@ -228,10 +236,9 @@ std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Ca
       scene.brocMesh.vertices[vIdx].color = glm::vec3(0.5f, 0.0f, 0.5f);
     }
     brocMesh.sendGl();
-    return result;
+    return;
   }
   brocMesh.sendGl();
-  return {};
 }
 
 } // namespace brocseg
@@ -271,8 +278,8 @@ int main(int argc, char *argv[]) {
   broc::ShaderProgram shader{vertex_shader, fragment_shader};
   shader.useProgram();
 
-  broc::Camera camera{.phaseY = -math::pi / 2.0f,
-                      .phaseX = 0.0f,
+  broc::Camera camera{.theta = 0.0f,
+                      .phi = math::halfpi,
                       .amp = 3.0f,
                       .screenWidth = screenWidth,
                       .screenHeight = screenHeight};
@@ -287,38 +294,27 @@ int main(int argc, char *argv[]) {
 
     ImGui::ShowDemoWindow();
 
-    if (ImGui::SliderFloat("cameraPhaseY", &camera.phaseY, -math::pi, math::pi) ||
-        ImGui::SliderFloat("cameraPhaseX", &camera.phaseX, -math::pi, math::pi) ||
-        ImGui::SliderFloat("cameraAmp", &camera.amp, 1.0f, 200.0)) {
-      camera.updateMatrices();
-    }
-    if (io.MouseWheel != 0.0f) {
-      camera.amp += -io.MouseWheel * 0.1f;
-      camera.updateMatrices();
-    }
-
-    if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      glm::ivec2 mouse = glm::ivec2(io.MousePos.x, io.MousePos.y);
-      handleMouseClickLeft(mouse, camera, scene);
-    }
-
-    /*
-    if (replayIdx < replay.size()) {
-      for (size_t vIdx : replay[replayIdx]) {
-        scene.brocMesh.vertices[vIdx].color = glm::vec3(0.5f, 0.0f, 0.5f);
+    if (!io.WantCaptureMouse) {
+      if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+        if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
+          ImGui::Text("Mouse delta: (%g, %g)", io.MouseDelta.x, io.MouseDelta.y);
+          float dPhi = ((float)(-io.MouseDelta.y) / 300.0f);
+          float dTheta = ((float)(-io.MouseDelta.x) / 300.0f);
+          camera.phi += dPhi;
+          camera.theta += dTheta;
+          camera.updateMatrices();
+        }
       }
-      scene.brocMesh.sendGl();
-      ++replayIdx;
-      if (replayIdx == replay.size()) {
-        replayIdx = 0;
-        colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
-      }
-    }
-    */
 
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-      scene.selectedVertexIndices.clear();
-      colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+      if (io.MouseWheel != 0.0f) {
+        camera.amp += -io.MouseWheel * 0.1f;
+        camera.updateMatrices();
+      }
+
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        glm::ivec2 mouse = glm::ivec2(io.MousePos.x, io.MousePos.y);
+        handleMouseClickLeft(mouse, camera, scene);
+      }
     }
 
     if (ImGui::SliderFloat("curvature percentile", &scene.percentile, 0.1f, 1.0f)) {
@@ -333,8 +329,7 @@ int main(int argc, char *argv[]) {
 
     ImGui::Text(scene.brocMesh.getName());
 
-    glm::mat4 modelM =
-        glm::mat4(1.0f); // glm::rotate(glm::mat4(1.0f), -math::halfpi, glm::vec3(1.0, 0.0, 0.0));
+    glm::mat4 modelM = glm::mat4(1.0f);
     glm::vec3 lightPos = camera.cameraPos;
 
     shader.uniformMatrix4fv("model", modelM);
