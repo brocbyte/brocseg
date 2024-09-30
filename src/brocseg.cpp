@@ -80,35 +80,20 @@ std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh,
   colorBy(brocMesh, curvatures, percentile);
   auto [minCurvature, maxCurvature] = math::percentileThreshold(curvatures, percentile);
 
-  std::vector<float> weights(curvatures.size(), 0.0f);
   float infiniteWeight = 1e8 * omMesh.n_vertices();
   float minQuality = curvatureToQuality(maxCurvature);
   float maxQuality = curvatureToQuality(minCurvature);
-  std::transform(curvatures.begin(), curvatures.end(), weights.begin(),
-                 [&infiniteWeight, &maxQuality, &minQuality](float c) {
-                   float w = curvatureToQuality(c);
-                   if (w > maxQuality) {
-                     w = infiniteWeight;
-                   } else if (w < minQuality) {
-                     w = 0.0f;
-                   }
-                   return w;
-                 });
-  return weights;
-}
-
-std::vector<float> colorByMeanCurvature(OpenMeshT &omMesh, float percentile) {
-  std::vector<float> result(omMesh.n_vertices());
-  for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
-    std::vector<glm::vec3> adjacent = adjacentVertices(omMesh, vh);
-    OpenMeshT::Point point = omMesh.point(vh);
-    OpenMeshT::Normal normal = omMesh.normal(vh);
-    glm::vec p = glm::vec3(point[0], point[1], point[2]);
-    glm::vec n = glm::vec3(normal[0], normal[1], normal[2]);
-    float meanCurvature = math::meanCurvature(p, adjacent, n);
-    result[vh.idx()] = meanCurvature;
+  std::vector<float> weights(curvatures.size());
+  for (size_t i = 0; i < curvatures.size(); ++i) {
+    float w = curvatureToQuality(curvatures[i]);
+    if (w > maxQuality) {
+      w = infiniteWeight;
+    } else if (w < minQuality) {
+      w = -infiniteWeight;//0.0f;
+    }
+    weights[i] = w;
   }
-  return result;
+  return weights;
 }
 
 std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size_t sIdx,
@@ -121,15 +106,21 @@ std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size
     g.capacity_[vh.idx()].resize(nVertices);
     for (OpenMeshT::HalfedgeHandle he : omMesh.voh_range(vh)) {
       OpenMeshT::VertexHandle to = omMesh.to_vertex_handle(he);
-      if (glm::length(brocMesh.vertices[sIdx].pos - brocMesh.vertices[vh.idx()].pos) > 7.0f) {
+      /*
+      if (glm::length(brocMesh.vertices[sIdx].pos - brocMesh.vertices[vh.idx()].pos) > 0.1f) {
         continue;
       }
+      */
       g.adj_[vh.idx()].push_back(to.idx());
+      float infiniteWeight = 1e8 * omMesh.n_vertices();
       float e1 = energy[vh.idx()];
       float e2 = energy[to.idx()];
       float diff = std::abs(e1 - e2);
-      g.capacity_[vh.idx()][to.idx()] =
-          (diff > math::EPS) ? (1.0 / diff) : std::numeric_limits<i32>::max();
+      float weight = (diff > math::EPS) ? (1.0 / diff) : std::numeric_limits<i32>::max();
+      if (std::abs(e1) > 100 || std::abs(e2) > 100) {
+        weight = 0.0f;
+      }
+      g.capacity_[vh.idx()][to.idx()] = static_cast<i32>(weight);
     }
   }
   std::vector<size_t> result = g.mincut(sIdx, tIdx);
@@ -142,8 +133,12 @@ void translateToOrigin(broc::Mesh &brocMesh) {
     box.addPoint(v.pos);
   }
   glm::vec3 translate = -1.0f * (box.maxp + box.minp) / 2.0f;
+  glm::vec3 diag = box.maxp - box.minp;
+  float scale = std::max(diag[0], std::max(diag[1], diag[2]));
+  glm::mat4 normalizer = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f / scale))
+    * glm::translate(glm::mat4(1.0f), translate);
   for (auto &v : brocMesh.vertices) {
-    v.pos += translate;
+    v.pos = glm::vec3(normalizer * glm::vec4(v.pos, 1.0f));
   }
 }
 
@@ -213,8 +208,9 @@ std::vector<size_t> handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Ca
   std::vector<float> vertexDistances(brocMesh.vertices.size(), std::numeric_limits<float>::max());
   for (size_t i = 0; i < brocMesh.vertices.size(); ++i) {
     float dist = glm::length(glm::cross(rayWorld, brocMesh.vertices[i].pos - camera.cameraPos));
-    if (dist <= 0.5) {
-      vertexDistances[i] = glm::length(brocMesh.vertices[i].pos - camera.cameraPos);
+    if (dist <= 0.01) {
+      float d = glm::dot(rayWorld, brocMesh.vertices[i].pos - camera.cameraPos);
+      vertexDistances[i] = d;
     }
   }
   size_t minDistIdx = std::distance(
@@ -253,6 +249,7 @@ int main(int argc, char *argv[]) {
 
   prof::watch meshesWatch;
   const char *meshName = "stl/test.stl";
+  //const char *meshName = "stl/bunny.obj";
 
   Scene scene = {.omMesh = loadMesh(meshName),
                  .brocMesh = convert(scene.omMesh, meshName),
@@ -274,9 +271,9 @@ int main(int argc, char *argv[]) {
   broc::ShaderProgram shader{vertex_shader, fragment_shader};
   shader.useProgram();
 
-  broc::Camera camera{.phaseY = 0.0f,
+  broc::Camera camera{.phaseY = -math::pi / 2.0f,
                       .phaseX = 0.0f,
-                      .amp = 100.0f,
+                      .amp = 3.0f,
                       .screenWidth = screenWidth,
                       .screenHeight = screenHeight};
   camera.updateMatrices();
@@ -296,7 +293,7 @@ int main(int argc, char *argv[]) {
       camera.updateMatrices();
     }
     if (io.MouseWheel != 0.0f) {
-      camera.amp += -io.MouseWheel * 1.0f;
+      camera.amp += -io.MouseWheel * 0.1f;
       camera.updateMatrices();
     }
 

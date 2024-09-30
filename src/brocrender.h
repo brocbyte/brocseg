@@ -92,11 +92,11 @@ public:
   glm::mat4 viewM;
   glm::vec3 cameraPos;
   void updateMatrices() {
-    projM = glm::perspective(brocseg::math::pi * 0.25f, (float)screenWidth / (float)screenHeight, 0.1f, 1000.f),
-    cameraPos = glm::vec3(
-        glm::rotate(glm::mat4(1.0), phaseY, glm::vec3(0.0, 1.0, 0.0))
-        * glm::rotate(glm::mat4(1.0), phaseX, glm::vec3(0.0, 0.0, 1.0))
-        * glm::vec4(amp, 0, 0, 1));
+    projM = glm::perspective(brocseg::math::pi * 0.25f, (float)screenWidth / (float)screenHeight,
+                             0.1f, 1000.f),
+    cameraPos = glm::vec3(glm::rotate(glm::mat4(1.0), phaseY, glm::vec3(0.0, 1.0, 0.0)) *
+                          glm::rotate(glm::mat4(1.0), phaseX, glm::vec3(0.0, 0.0, 1.0)) *
+                          glm::vec4(amp, 0, 0, 1));
     viewM = glm::lookAt(cameraPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
   }
 };
