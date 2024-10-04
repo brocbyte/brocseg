@@ -161,51 +161,39 @@ inline std::pair<float, float> percentileThreshold(std::vector<float> arr, float
   return {arr[windowBeg], arr[windowBeg + windowSize - 1]};
 }
 
-class HSV {
-public:
-  HSV(float H, float S, float V) : H_(H), S_(S), V_(V) {
-    if (!(H >= 0 && H <= 1) || !(S >= 0 && S <= 1) || !(V >= 0 && V <= 1)) {
-      throw std::invalid_argument("bad hsv values");
-    }
-  }
-  glm::vec3 toRGB() {
-    float r, g, b;
+glm::vec3 rgbFromHsv(float H_, float S_, float V_) {
+  float r, g, b;
 
-    int i = static_cast<int>(H_ * 6);
-    float f = H_ * 6.0f - i;
-    float p = V_ * (1.0f - S_);
-    float q = V_ * (1.0f - f * S_);
-    float t = V_ * (1.0f - (1.0f - f) * S_);
-    switch (i % 6) {
-    case 0:
-      r = V_, g = t, b = p;
-      break;
-    case 1:
-      r = q, g = V_, b = p;
-      break;
-    case 2:
-      r = p, g = V_, b = t;
-      break;
-    case 3:
-      r = p, g = q, b = V_;
-      break;
-    case 4:
-      r = t, g = p, b = V_;
-      break;
-    case 5:
-      r = V_, g = p, b = q;
-      break;
-    }
-    return glm::vec3{r, g, b};
+  int i = static_cast<int>(H_ * 6);
+  float f = H_ * 6.0f - i;
+  float p = V_ * (1.0f - S_);
+  float q = V_ * (1.0f - f * S_);
+  float t = V_ * (1.0f - (1.0f - f) * S_);
+  switch (i % 6) {
+  case 0:
+    r = V_, g = t, b = p;
+    break;
+  case 1:
+    r = q, g = V_, b = p;
+    break;
+  case 2:
+    r = p, g = V_, b = t;
+    break;
+  case 3:
+    r = p, g = q, b = V_;
+    break;
+  case 4:
+    r = t, g = p, b = V_;
+    break;
+  case 5:
+    r = V_, g = p, b = q;
+    break;
   }
-
-private:
-  float H_, S_, V_;
-};
+  return glm::vec3{r, g, b};
+}
 
 inline glm::vec3 colorFromNormalized(float val) {
-  HSV hsvColor{val * (240.0f / 360.0f), 1.0, 1.0};
-  return hsvColor.toRGB();
+  return rgbFromHsv(val * (240.0f / 360.0f), 1.0, 1.0);
 }
 
 class flownet {
