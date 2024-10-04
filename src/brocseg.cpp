@@ -4,6 +4,7 @@
 #include <optional>
 #include <stdexcept>
 #include <cmath>
+#include <unordered_set>
 
 // broc
 #include "broccommon.h"
@@ -60,7 +61,7 @@ std::vector<glm::vec3> adjacentVertices(OpenMeshT &omMesh, OpenMeshT::VertexHand
   });
 }
 
-std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh, float percentile) {
+std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh, float percentile, bool colorIt) {
   prof::watch w{};
   std::vector<float> curvatures(omMesh.n_vertices());
   for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
@@ -77,7 +78,9 @@ std::vector<float> colorByMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh,
   }
   std::cout << w.report("curvature") << "\n";
 
-  colorBy(brocMesh, curvatures, percentile);
+  if (colorIt) {
+    colorBy(brocMesh, curvatures, percentile);
+  }
   auto [minCurvature, maxCurvature] = math::percentileThreshold(curvatures, percentile);
 
   float infiniteWeight = 1e8 * omMesh.n_vertices();
@@ -199,6 +202,14 @@ glm::vec3 mouseToWorldDir(const glm::ivec2 &mouse, const broc::Camera &camera) {
 
 void handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera,
                                          Scene &scene) {
+  static size_t colorIdx = 0;
+
+  std::vector<glm::vec3> colors;
+  size_t nColors = 8;
+  for (int i = 0; i < nColors; i++) {
+    math::HSV color{(float)i / (float)nColors * (2.0f / 3.0f), 1.0f, 1.0f};
+    colors.push_back(color.toRGB());
+  }
   // construct ray from camera to clicked point
   glm::vec3 rayWorld = mouseToWorldDir(mouse, camera);
   std::cout << rayWorld.x << " " << rayWorld.y << " " << rayWorld.z << "\n";
@@ -219,26 +230,28 @@ void handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera,
       vertexDistances.begin(), std::min_element(vertexDistances.begin(), vertexDistances.end()));
   if (!found) {
     scene.selectedVertexIndices.clear();
-    colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+    colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile, true);
     brocMesh.sendGl();
     return;
   }
 
-  brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
+  //brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
   scene.selectedVertexIndices.push_back(minDistIdx);
   if (scene.selectedVertexIndices.size() >= 2) {
     size_t sIdx = scene.selectedVertexIndices[0];
     size_t tIdx = scene.selectedVertexIndices[1];
-    std::vector<float> curvatures = colorByMeanCurvature(brocMesh, omMesh, scene.percentile);
-    auto result = colorByBorders(brocMesh, omMesh, sIdx, tIdx, curvatures);
+    std::vector<float> curvatures = colorByMeanCurvature(brocMesh, omMesh, scene.percentile, false);
+    std::vector<size_t> result = colorByBorders(brocMesh, omMesh, sIdx, tIdx, curvatures);
     scene.selectedVertexIndices.clear();
     for (size_t vIdx : result) {
-      scene.brocMesh.vertices[vIdx].color = glm::vec3(0.5f, 0.0f, 0.5f);
+      scene.brocMesh.vertices[vIdx].color = colors[colorIdx];
     }
     brocMesh.sendGl();
-    return;
+    ++colorIdx;
+    if (colorIdx >= colors.size()) {
+      colorIdx = 0;
+    }
   }
-  brocMesh.sendGl();
 }
 
 } // namespace brocseg
@@ -255,7 +268,7 @@ int main(int argc, char *argv[]) {
   broc::OpenGLRenderer renderer{"brocseg", screenWidth, screenHeight};
 
   prof::watch meshesWatch;
-  const char *meshName = "stl/test.stl";
+  const char *meshName = "stl/leg.stl";
   //const char *meshName = "stl/bunny.obj";
 
   Scene scene = {.omMesh = loadMesh(meshName),
@@ -266,7 +279,7 @@ int main(int argc, char *argv[]) {
   scene.brocMesh.sendGl();
 
   // https://julie-jiang.github.io/image-segmentation/
-  colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+  colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile, true);
 
   const char *vertex_shader =
 #include "shader.vs"
@@ -318,7 +331,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (ImGui::SliderFloat("curvature percentile", &scene.percentile, 0.1f, 1.0f)) {
-      colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile);
+      colorByMeanCurvature(scene.brocMesh, scene.omMesh, scene.percentile, true);
     }
 
     for (size_t vIdx : scene.selectedVertexIndices) {
