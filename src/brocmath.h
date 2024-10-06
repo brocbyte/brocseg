@@ -226,6 +226,7 @@ public:
 
     std::vector<std::vector<i32>> residualCapacity{capacity_};
     int flow = 0;
+    size_t nVertices = adj_.size();
     std::vector<size_t> parent(nVertices);
     int newFlow;
     while (newFlow = bfs(s, t, parent, residualCapacity)) {
@@ -250,13 +251,11 @@ public:
     std::cout << "MOY FLOW ARBALET: " << flow << "\n";
     return sVertices;
   }
-  size_t nVertices;
   std::vector<std::vector<size_t>> adj_;
   std::vector<std::vector<i32>> capacity_;
 };
 /*!todo test
-    math::flownet g = {.nVertices = 6,
-                       .adj_ =
+    math::flownet g = { .adj_ =
                            {
                                {1, 4},       // 0
                                {0, 2, 3, 4}, // 1

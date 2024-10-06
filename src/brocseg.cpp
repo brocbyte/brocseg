@@ -22,7 +22,7 @@
 using u32 = uint32_t;
 
 namespace brocseg {
-typedef OpenMesh::TriMesh_ArrayKernelT<> OpenMeshT;
+using OpenMeshT = OpenMesh::TriMesh_ArrayKernelT<>;
 
 struct Scene {
   OpenMeshT omMesh;
@@ -31,10 +31,12 @@ struct Scene {
   float percentile;
 };
 
-float curvatureToQuality(float curvature) { return 1.0f / std::exp(curvature); }
+inline float curvatureToQuality(float curvature) {
+  return 1.0f / std::exp(curvature);
+}
 
 void normalize(std::vector<float> &arr, float percentile) {
-  prof::watch percentileWatch{};
+  prof::watch percentileWatch;
   auto [m, M] = math::percentileThreshold(arr, percentile);
   std::cout << percentile << " percentile: [" << m << ", " << M << "]\n";
   std::cout << percentileWatch.report("percentile calculation") << "\n";
@@ -63,7 +65,7 @@ std::vector<glm::vec3> adjacentVertices(OpenMeshT &omMesh, OpenMeshT::VertexHand
 }
 
 std::vector<float> computePerVertexMeanCurvature(broc::Mesh &brocMesh, OpenMeshT &omMesh) {
-  prof::watch w{};
+  prof::watch w;
   std::vector<float> rawCurvatures(omMesh.n_vertices());
   for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
     std::vector<glm::vec3> adjacent = adjacentVertices(omMesh, vh);
@@ -82,7 +84,7 @@ std::vector<float> computePerVertexMeanCurvature(broc::Mesh &brocMesh, OpenMeshT
 }
 
 std::vector<float> energyFromCurvatures(const std::vector<float> &rawCurvatures, float percentile) {
-  std::vector<float> energy{rawCurvatures};
+  std::vector<float> energy = rawCurvatures;
   auto [minCurvature, maxCurvature] = math::percentileThreshold(energy, percentile);
 
   float infiniteWeight = 1e8 * energy.size();
@@ -90,11 +92,6 @@ std::vector<float> energyFromCurvatures(const std::vector<float> &rawCurvatures,
   float maxQuality = curvatureToQuality(minCurvature);
   for (size_t i = 0; i < energy.size(); ++i) {
     float w = curvatureToQuality(energy[i]);
-    if (w > maxQuality) {
-      w = infiniteWeight;
-    } else if (w < minQuality) {
-      w = -infiniteWeight;
-    }
     energy[i] = w;
   }
   return energy;
@@ -103,7 +100,7 @@ std::vector<float> energyFromCurvatures(const std::vector<float> &rawCurvatures,
 std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size_t sIdx,
                                    size_t tIdx, const std::vector<float> &energy) {
   size_t nVertices = brocMesh.vertices.size();
-  math::flownet g = {.nVertices = nVertices};
+  math::flownet g;
   g.adj_.resize(nVertices);
   g.capacity_.resize(nVertices);
   for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
@@ -148,7 +145,7 @@ broc::Mesh convert(const OpenMeshT &omMesh, const std::string &name) {
     OpenMeshT::Normal n = omMesh.normal(*vIt);
     broc::Mesh::Vertex v{.pos = glm::vec3(p[0], p[1], p[2]),
                          .normal = glm::vec3(n[0], n[1], n[2]),
-                         .color = glm::vec3(0.5f, 0.0f, 0.5f)};
+                         .color = glm::vec3(0.3f, 0.3f, 0.3f)};
     brocMesh.vertices.push_back(v);
   }
 
@@ -178,6 +175,8 @@ OpenMeshT loadMesh(const std::string &pFile) {
     mesh.update_normals();
     mesh.release_face_normals();
   }
+  std::cout << "## n vertices: " << mesh.n_vertices() << "\n";
+  std::cout << "## n faces: " << mesh.n_faces() << "\n";
 
   return mesh;
 }
@@ -236,7 +235,7 @@ void handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera, S
     return;
   }
 
-  brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
+  //brocMesh.vertices[minDistIdx].color = glm::vec3(0.5, 0.0, 0.5);
   scene.selectedVertexIndices.push_back(minDistIdx);
   if (scene.selectedVertexIndices.size() >= 2) {
     size_t sIdx = scene.selectedVertexIndices[0];
@@ -267,7 +266,7 @@ int main(int argc, char *argv[]) {
 
   prof::watch meshesWatch;
   const char *meshName = "stl/test.stl";
-  // const char *meshName = "stl/bunny.obj";
+  //const char *meshName = "stl/bunny.obj";
 
   Scene scene = {.omMesh = loadMesh(meshName),
                  .brocMesh = convert(scene.omMesh, meshName),
