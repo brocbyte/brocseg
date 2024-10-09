@@ -49,6 +49,7 @@ void normalize(std::vector<float> &arr, float percentile) {
 }
 
 void colorBy(broc::Mesh &brocMesh, const std::vector<float> &source, float percentile) {
+  return;
   std::vector<float> normalizedSource{source};
   normalize(normalizedSource, percentile);
   for (int vIdx = 0; vIdx < brocMesh.vertices.size(); ++vIdx) {
@@ -120,6 +121,22 @@ std::vector<size_t> colorByBorders(broc::Mesh &brocMesh, OpenMeshT &omMesh, size
     }
   }
   std::vector<size_t> result = g.mincut(sIdx, tIdx);
+
+  {
+    std::unordered_set<size_t> setResult(result.begin(), result.end());
+    for (OpenMeshT::VertexHandle vh : omMesh.vertices()) {
+      bool allNeighborsSelected = true;
+      for (OpenMeshT::VertexHandle vv : omMesh.vv_range(vh)) {
+        if (setResult.find(vv.idx()) == setResult.end()) {
+          allNeighborsSelected = false;
+        }
+      }
+      if (allNeighborsSelected && setResult.find(vh.idx()) == setResult.end()) {
+        result.push_back(vh.idx());
+      }
+    }
+  }
+
   return result;
 }
 
@@ -265,7 +282,7 @@ int main(int argc, char *argv[]) {
   broc::OpenGLRenderer renderer{"brocseg", screenWidth, screenHeight};
 
   prof::watch meshesWatch;
-  const char *meshName = "stl/test.stl";
+  const char *meshName = "stl/leg.stl";
   //const char *meshName = "stl/bunny.obj";
 
   Scene scene = {.omMesh = loadMesh(meshName),
