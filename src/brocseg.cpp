@@ -217,14 +217,16 @@ glm::vec3 getNextColor() {
   ++colorIdx;
   std::vector<float> hue = {0.0f,  180.0f, 270.0f, 45.0f, 225.0f, 315.0f,
                             15.0f, 195.0f, 285.0f, 30.0f, 210.0f, 300.0f};
-  std::vector<glm::vec3> colors(hue.size());
-  for (size_t i = 0; i < colors.size(); ++i) {
-    colors[i] = math::rgbFromHsv(hue[i] / 360.0f, 1.0f, 1.0f);
-  }
+  std::vector<glm::vec3> colors;
+  colors.reserve(hue.size());
+  auto rgbFromHue = [](const float& h) {
+    return math::rgbFromHsv(h / 360.0f, 1.0f, 1.0f);
+  };
+  std::transform(hue.begin(), hue.end(), std::back_inserter(colors), rgbFromHue);
   if (colorIdx >= colors.size()) {
     colorIdx = 0;
   }
-  return colors[colorIdx];
+  return colors.at(colorIdx);
 }
 
 void handleMouseClickLeft(const glm::ivec2 &mouse, const broc::Camera &camera, Scene &scene,
